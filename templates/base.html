@@ -1,0 +1,181 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SmartSense{% endblock %}</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary-color: #4a69bd;
+            --light-grey: #f0f2f5;
+            --dark-grey: #4a4a4a;
+            --text-color: #333;
+            --card-bg: #ffffff;
+            --border-radius: 12px;
+        }
+
+        body { 
+            font-family: 'Poppins', sans-serif; 
+            background-color: var(--light-grey); 
+        }
+        
+        .main-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 50px 20px;
+        }
+
+        .container { 
+            background: var(--card-bg); 
+            padding: 40px; 
+            border-radius: var(--border-radius); 
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08); 
+            text-align: center; 
+            max-width: 800px; /* Diperlebar untuk chart */
+            width: 100%;
+            border-top: 5px solid var(--primary-color);
+        }
+
+        .data-grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 20px; 
+            margin: 30px 0; 
+        } 
+
+        .data-box { 
+            background: #f8f9fa;
+            padding: 25px; 
+            border-radius: var(--border-radius);
+            border: 1px solid #e9ecef;
+        }
+
+        .data-box h3 { 
+            margin-top: 0;
+            font-weight: 600;
+            font-size: 1em;
+            color: var(--dark-grey);
+        }
+
+        .data-box p { 
+            font-size: 2.8em; 
+            margin: 0; 
+            font-weight: 700; 
+            color: var(--primary-color); 
+        }
+
+        .timestamp { 
+            font-size: 0.85em; 
+            color: #6c757d; 
+            margin-top: 25px; 
+        }
+
+        @media (max-width: 600px) {
+            .data-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+
+    <style>
+        :root {
+            --primary-color: #4a69bd;
+            --light-grey: #f0f2f5;
+            --dark-grey: #4a4a4a;
+            --text-color: #333;
+            --card-bg: #ffffff;
+            --border-radius: 12px;
+        }
+        body { 
+            font-family: 'Poppins', sans-serif; 
+            background-color: var(--light-grey); 
+        }
+        .navbar-brand, .nav-link, .navbar-text {
+            color: var(--dark-grey) !important;
+        }
+        .logout-btn {
+            background-color: #dc3545; 
+            color: white !important; 
+            border: none;
+        }
+        .main-container {
+            padding: 40px 20px;
+        }
+        /* Efek fade-in sederhana */
+        .fade-in {
+            animation: fadeIn 0.8s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+    
+    {% block styles %}{% endblock %}
+</head>
+<body>
+    
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a style="color: #333;" class="navbar-brand" href="#"><strong>SmartSense</strong></a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a style="color: #333;" class="nav-link active" href="{% url 'dashboard' %}">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a style="color: #333;" class="nav-link" href="{% url 'laporan_historis' %}">Laporan</a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav ms-auto">
+                    {% if user.is_authenticated %}
+                        <li class="nav-item">
+                            <span style="color: #333;" class="navbar-text me-3">
+                                Halo, <strong>{{ user.username }}</strong>!
+                            </span>
+                        </li>
+                        <li class="nav-item">
+                            <form action="{% url 'logout' %}" method="post" class="d-flex">
+                                {% csrf_token %}
+                                <button style="background-color: #dc3545; color: white; border: none;" type="submit" class="btn">Logout</button>
+                            </form>
+                        </li>
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{% url 'login' %}">Login</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="btn btn-primary ms-2" href="{% url 'register' %}">Register</a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-container fade-in">
+        {% block content %}
+        {% endblock %}
+    </main>
+    
+    <footer class="text-center text-muted mt-4 py-3">
+        <p>&copy; {% now "Y" %} Proyek SmartSense.</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    {% block scripts %}
+    {% endblock %}
+</body>
+</html>
