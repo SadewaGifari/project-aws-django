@@ -11,8 +11,6 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-import os
-from influxdb_client import InfluxDBClient
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -136,19 +134,3 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/'
-
-INFLUX_URL = os.getenv("INFLUX_URL", None)
-INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", None)
-INFLUX_ORG = os.getenv("INFLUX_ORG", None)
-
-if INFLUX_URL and INFLUX_TOKEN and INFLUX_ORG:
-    try:
-        influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-        query_api = influx_client.query_api()
-        print("✅ InfluxDB Connected")
-    except Exception as e:
-        print(f"[WARNING] InfluxDB tidak bisa diakses: {e}")
-        query_api = None
-else:
-    print("⚠️ InfluxDB config tidak ditemukan — dilewati.")
-    query_api = None

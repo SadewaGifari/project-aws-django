@@ -2,179 +2,176 @@
 
 from django.shortcuts import render
 from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import csrf_exempt
 import json
+from .models import DataSensor
+from django.contrib.auth.decorators import login_required
+from django.utils import timezone
+import datetime
+from django.db.models import Avg, Max, Min
+from django.core.paginator import Paginator
+
+# --- TAHAP INTEGRASI: Import library yang dibutuhkan ---
+import joblib
 import os
 from django.conf import settings
 import numpy as np
-import pandas as pd # Kita butuh pandas untuk olah data
-import joblib
-from proyekjamur import settings
-
-# --- TAHAP INTEGRASI: Import library InfluxDB ---
-from influxdb_client import InfluxDBClient
-from influxdb_client.client.write_api import SYNCHRONOUS
 # ----------------------------------------------------
 
 
-# --- TAHAP INTEGRASI: Konfigurasi Koneksi InfluxDB ---
-INFLUX_URL = "http://103.151.63.81:8087"
-INFLUX_TOKEN = "Sv2J_33XCeYy4SgQSijT09qr4OTjrUjcLz59oJci2nny46OzPuclSy3R3CIFe3-PJuChMogeiwuVL7iRnjM8Mg=="
-INFLUX_ORG = "proyek_jamur"
-INFLUX_BUCKET = "sensor_data"
-
-# Membuat koneksi client ke InfluxDB
-influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-query_api = influx_client.query_api()
-# ----------------------------------------------------
-
-
-# --- Logika Model AI (TIDAK BERUBAH) ---
+# === TAHAP INTEGRASI: Muat SEMUA Model & Encoder ===
 MODEL_DIR = os.path.join(settings.BASE_DIR, 'prediksi', 'ml_model')
-AI_MODEL = joblib.load(os.path.join(MODEL_DIR, 'sensor_model.pkl'))
-LABEL_ENCODER = joblib.load(os.path.join(MODEL_DIR, 'sensor_label_encoder.pkl'))
-VENT_ENCODER = joblib.load(os.path.join(MODEL_DIR, 'ventilation_encoder.pkl'))
-LIGHT_ENCODER = joblib.load(os.path.join(MODEL_DIR, 'light_encoder.pkl'))
 
+# Coba load model & encoder dengan proteksi error
+try:
+    AI_MODEL = joblib.load(os.path.join(MODEL_DIR, 'sensor_model.pkl'))
+    LABEL_ENCODER = joblib.load(os.path.join(MODEL_DIR, 'sensor_label_encoder.pkl'))
+    VENT_ENCODER = joblib.load(os.path.join(MODEL_DIR, 'ventilation_encoder.pkl'))
+    LIGHT_ENCODER = joblib.load(os.path.join(MODEL_DIR, 'light_encoder.pkl'))
+    print("[INFO] Model ML dan encoder berhasil dimuat.")
+except Exception as e:
+    AI_MODEL = LABEL_ENCODER = VENT_ENCODER = LIGHT_ENCODER = None
+    print(f"[WARNING] Gagal memuat model ML: {e}")
+# ----------------------------------------------------
+
+
+# === Fungsi Prediksi Risiko dengan AI ===
 def prediksi_risiko(suhu, kelembapan):
+    """
+    Fungsi ini menggunakan model AI 5-fitur yang sudah dilatih.
+    """
+    # Cek apakah model dan encoder sudah siap
+    if not AI_MODEL or not LABEL_ENCODER:
+        return "Error", "Model AI belum dimuat. Pastikan file .pkl tersedia di folder ml_model."
+
     try:
+        # Nilai asumsi untuk fitur tambahan
         ph_asumsi = 7.0
         ventilasi_asumsi = 'low'
         cahaya_asumsi = 'low'
+
+        # Encoding fitur kategorikal
         ventilasi_enc = VENT_ENCODER.transform([ventilasi_asumsi])[0]
         cahaya_enc = LIGHT_ENCODER.transform([cahaya_asumsi])[0]
+
+        # Siapkan 5 fitur input (urutan harus sama seperti di Colab)
         fitur_input = np.array([[suhu, kelembapan, ph_asumsi, ventilasi_enc, cahaya_enc]])
+
+        # Prediksi
         hasil_prediksi_numerik = AI_MODEL.predict(fitur_input)
+
+        # Konversi hasil ke label teks
         risiko_teks = LABEL_ENCODER.inverse_transform(hasil_prediksi_numerik)[0]
-        if risiko_teks == 'high':
-            return "Tinggi", "Model AI (5 Fitur) mendeteksi kondisi ideal untuk pertumbuhan jamur."
+
+        # Rekomendasi
+        if risiko_teks.lower() == 'high':
+            return "Tinggi", "Model AI mendeteksi kondisi ideal untuk pertumbuhan jamur."
         else:
-            return "Aman", "Model AI (5 Fitur) memprediksi kondisi saat ini tidak mendukung pertumbuhan jamur."
+            return "Aman", "Model AI memprediksi kondisi saat ini tidak mendukung pertumbuhan jamur."
+
     except Exception as e:
         return "Error", f"Terjadi kesalahan saat prediksi AI: {e}"
-# ----------------------------------------------------
 
-def dashboard_prediksi(request):
-    data_sensor = []
 
-    if settings.query_api:  # pastikan koneksi Influx tersedia
+# === Endpoint untuk menyimpan data sensor ===
+@csrf_exempt
+def simpan_data_sensor(request):
+    if request.method == 'POST':
         try:
-            query = 'from(bucket:"jamur") |> range(start: -1h)'
-            tables = settings.query_api.query(query)
-            for table in tables:
-                for record in table.records:
-                    data_sensor.append({
-                        "waktu": record.get_time(),
-                        "suhu": record.get_value()
-                    })
+            data = json.loads(request.body)
+            temperature = data.get('temperature')
+            humidity = data.get('humidity')
+
+            if temperature is not None and humidity is not None:
+                DataSensor.objects.create(temperature=temperature, humidity=humidity)
+                return JsonResponse({'status': 'sukses', 'message': 'Data berhasil disimpan'}, status=201)
+            else:
+                return JsonResponse({'status': 'gagal', 'message': 'Data `temperature` atau `humidity` tidak lengkap'}, status=400)
+
+        except json.JSONDecodeError:
+            return JsonResponse({'status': 'gagal', 'message': 'Format JSON salah'}, status=400)
+
         except Exception as e:
-            print(f"[WARNING] Gagal ambil data Influx: {e}")
-    else:
-        print("⚠️ InfluxDB tidak aktif — tampilkan dummy data.")
+            return JsonResponse({'status': 'gagal', 'message': f'Kesalahan server: {e}'}, status=500)
+
+    return JsonResponse({'status': 'gagal', 'message': 'Metode tidak diizinkan'}, status=405)
 
 
-
-# --- TULIS ULANG FUNGSI DASHBOARD ---
+# === Dashboard Prediksi ===
 @login_required
 def dashboard_prediksi(request):
-    # Query Flux untuk mengambil data terakhir
-    flux_query_latest = f'''
-    from(bucket: "{INFLUX_BUCKET}")
-        |> range(start: -1d) 
-        |> filter(fn: (r) => r["_measurement"] == "lingkungan")
-        |> filter(fn: (r) => r["_field"] == "humidity" or r["_field"] == "temperature")
-        |> last()
-    '''
-    tables_latest = query_api.query(flux_query_latest, org=INFLUX_ORG)
+    data_terakhir = DataSensor.objects.order_by('-timestamp').first()
 
-    suhu, kelembapan, timestamp = 0, 0, "Belum ada data"
-    if tables_latest:
-        for table in tables_latest:
-            for record in table.records:
-                if record.get_field() == 'temperature':
-                    suhu = record.get_value()
-                elif record.get_field() == 'humidity':
-                    kelembapan = record.get_value()
-        timestamp = tables_latest[0].records[0].get_time()
+    if data_terakhir:
+        suhu = data_terakhir.temperature
+        kelembapan = data_terakhir.humidity
+        timestamp = data_terakhir.timestamp
+        level_risiko, rekomendasi = prediksi_risiko(suhu, kelembapan)
+    else:
+        suhu, kelembapan, timestamp = (0, 0, "Belum ada data")
+        level_risiko, rekomendasi = ("Tidak Diketahui", "Belum ada data sensor untuk dianalisis.")
 
-    level_risiko, rekomendasi = prediksi_risiko(suhu, kelembapan)
+    # Ambil data 12 jam terakhir untuk grafik
+    twelve_hours_ago = timezone.now() - datetime.timedelta(hours=12)
+    data_historis = DataSensor.objects.filter(timestamp__gte=twelve_hours_ago).order_by('timestamp')
 
-    # Query Flux untuk data chart 12 jam terakhir
-    flux_query_chart = f'''
-    from(bucket: "{INFLUX_BUCKET}")
-        |> range(start: -12h)
-        |> filter(fn: (r) => r["_measurement"] == "lingkungan")
-        |> filter(fn: (r) => r["_field"] == "humidity" or r["_field"] == "temperature")
-        |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
-    '''
-    df_chart = query_api.query_data_frame(flux_query_chart, org=INFLUX_ORG)
-
-    labels, suhu_data, kelembapan_data = [], [], []
-    if not df_chart.empty:
-        df_chart_temp = df_chart[df_chart['_field'] == 'temperature']
-        df_chart_hum = df_chart[df_chart['_field'] == 'humidity']
-        labels = df_chart_temp['_time'].dt.strftime('%H:%M').tolist()
-        suhu_data = df_chart_temp['_value'].tolist()
-        kelembapan_data = df_chart_hum['_value'].tolist()
+    labels = [d.timestamp.strftime('%H:%M') for d in data_historis]
+    suhu_data = [d.temperature for d in data_historis]
+    kelembapan_data = [d.humidity for d in data_historis]
 
     context = {
-        'suhu': suhu, 'kelembapan': kelembapan, 'waktu_update': timestamp,
-        'level_risiko': level_risiko, 'rekomendasi': rekomendasi,
-        'chart_labels': json.dumps(labels), 'chart_suhu_data': json.dumps(suhu_data),
+        'suhu': suhu,
+        'kelembapan': kelembapan,
+        'waktu_update': timestamp,
+        'level_risiko': level_risiko,
+        'rekomendasi': rekomendasi,
+        'chart_labels': json.dumps(labels),
+        'chart_suhu_data': json.dumps(suhu_data),
         'chart_kelembapan_data': json.dumps(kelembapan_data),
     }
+
     return render(request, 'prediksi/dashboard.html', context)
 
 
-# --- TULIS ULANG FUNGSI LAPORAN ---
+# === Laporan Historis ===
 @login_required
 def laporan_historis(request):
-    days_to_filter = int(request.GET.get('days', 7))
-    
-    # Query Flux untuk data historis dan statistik
-    flux_query_report = f'''
-    from(bucket: "{INFLUX_BUCKET}")
-        |> range(start: -{days_to_filter}d)
-        |> filter(fn: (r) => r["_measurement"] == "lingkungan")
-        |> filter(fn: (r) => r["_field"] == "humidity" or r["_field"] == "temperature")
-    '''
-    df_report = query_api.query_data_frame(flux_query_report, org=INFLUX_ORG)
+    try:
+        days_to_filter = int(request.GET.get('days', 7))
+    except ValueError:
+        days_to_filter = 7
 
-    stats = {}
-    page_obj = [] # Untuk saat ini, kita sederhanakan tanpa paginasi dari InfluxDB
-    
-    if not df_report.empty:
-        df_temp = df_report[df_report['_field'] == 'temperature']['_value']
-        df_hum = df_report[df_report['_field'] == 'humidity']['_value']
-        stats = {
-            'avg_suhu': df_temp.mean(), 'max_suhu': df_temp.max(), 'min_suhu': df_temp.min(),
-            'avg_kelembapan': df_hum.mean(), 'max_kelembapan': df_hum.max(), 'min_kelembapan': df_hum.min(),
-        }
-        # Mengambil 100 data terakhir untuk ditampilkan di tabel
-        page_obj = df_report.sort_values(by='_time', ascending=False).head(100)
-        # Mengubah format data untuk template
-        page_obj = page_obj.pivot(index='_time', columns='_field', values='_value').reset_index()
-        page_obj = page_obj.sort_values(by='_time', ascending=False).to_dict('records')
+    start_date = timezone.now() - datetime.timedelta(days=days_to_filter)
+    data_list = DataSensor.objects.filter(timestamp__gte=start_date).order_by('-timestamp')
 
+    # Statistik agregat
+    stats = data_list.aggregate(
+        avg_suhu=Avg('temperature'),
+        max_suhu=Max('temperature'),
+        min_suhu=Min('temperature'),
+        avg_kelembapan=Avg('humidity'),
+        max_kelembapan=Max('humidity'),
+        min_kelembapan=Min('humidity'),
+    )
+
+    # Pagination
+    paginator = Paginator(data_list, 10)
+    page_number = request.GET.get('page', 1)
+    page_obj = paginator.get_page(page_number)
 
     # Data untuk chart
-    labels, suhu_data, kelembapan_data = [], [], []
-    if not df_report.empty:
-        df_chart = df_report.sort_values(by='_time')
-        df_chart_temp = df_chart[df_chart['_field'] == 'temperature']
-        df_chart_hum = df_chart[df_chart['_field'] == 'humidity']
-        labels = df_chart_temp['_time'].dt.strftime('%d %b %H:%M').tolist()
-        suhu_data = df_chart_temp['_value'].tolist()
-        kelembapan_data = df_chart_hum['_value'].tolist()
+    data_for_chart = data_list.order_by('timestamp')
+    labels = [d.timestamp.strftime('%d %b %H:%M') for d in data_for_chart]
+    suhu_data = [d.temperature for d in data_for_chart]
+    kelembapan_data = [d.humidity for d in data_for_chart]
 
     context = {
-        'page_obj': page_obj, 'stats': stats, 'days_filtered': days_to_filter,
-        'chart_labels': json.dumps(labels), 'chart_suhu_data': json.dumps(suhu_data),
+        'page_obj': page_obj,
+        'stats': stats,
+        'days_filtered': days_to_filter,
+        'chart_labels': json.dumps(labels),
+        'chart_suhu_data': json.dumps(suhu_data),
         'chart_kelembapan_data': json.dumps(kelembapan_data),
     }
+
     return render(request, 'prediksi/laporan.html', context)
-
-
-# --- HAPUS FUNGSI LAMA ---
-# Fungsi @csrf_exempt simpan_data_sensor(request) sudah tidak diperlukan lagi
-# karena Node-RED yang sekarang menangani penyimpanan data. Anda bisa menghapusnya.

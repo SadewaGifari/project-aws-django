@@ -68,19 +68,19 @@
                         <th scope="col">Kelembapan (%)</th>
                     </tr>
                 </thead>
-                    <tbody>
-                        {% for data in page_obj %}
-                        <tr>
-                            <td class="ps-3">{{ data._time|date:"d M Y, H:i" }}</td>
-                            <td>{{ data.temperature|floatformat:2 }}</td>
-                            <td>{{ data.humidity|floatformat:2 }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="3" class="text-center py-4">Tidak ada data untuk ditampilkan dari InfluxDB.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
+                <tbody>
+                    {% for data in page_obj %}
+                    <tr>
+                        <td class="ps-3">{{ data.timestamp|date:"d M Y, H:i" }}</td>
+                        <td>{{ data.temperature|floatformat:2 }}</td>
+                        <td>{{ data.humidity|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="3" class="text-center py-4">Tidak ada data untuk ditampilkan.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
             </table>
         </div>
         {% if page_obj.paginator.num_pages > 1 %}
